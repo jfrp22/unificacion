@@ -4,15 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Nodos IoT con GPS</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
+        :root {
+            --primary: #4361ee;
+            --secondary: #3f37c9;
+            --light: #f8f9fa;
+            --dark: #212529;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
             margin: 0;
             padding: 20px;
-            background-color: #f5f5f5;
         }
+        
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -20,62 +36,80 @@
             grid-template-columns: 1fr 1fr;
             gap: 20px;
         }
+        
         .panel {
             background-color: white;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        
         h1, h2 {
-            color: #333;
+            color: var(--primary);
+            margin-bottom: 15px;
         }
+        
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
         }
+        
         th, td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
         }
+        
         th {
-            background-color: #f2f2f2;
+            background-color: var(--primary);
+            color: white;
         }
+        
         tr:nth-child(even) {
             background-color: #f9f9f9;
         }
+        
         button {
-            background-color: #4CAF50;
+            background-color: var(--primary);
             color: white;
             border: none;
             padding: 8px 12px;
             border-radius: 4px;
             cursor: pointer;
             margin-right: 5px;
+            transition: all 0.3s;
         }
+        
         button:hover {
-            background-color: #45a049;
+            background-color: var(--secondary);
+            transform: translateY(-1px);
         }
+        
         #map {
             height: 400px;
             width: 100%;
             border-radius: 8px;
+            margin-top: 15px;
         }
+        
         .form-group {
             margin-bottom: 15px;
         }
+        
         label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
         }
+        
         select, input {
             width: 100%;
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+        
         .status-indicator {
             display: inline-block;
             width: 12px;
@@ -83,23 +117,48 @@
             border-radius: 50%;
             margin-right: 5px;
         }
+        
         .online {
-            background-color: #4CAF50;
+            color: green;
+            font-weight: bold;
         }
+        
         .offline {
-            background-color: #f44336;
+            color: red;
+            font-weight: bold;
         }
+        
         .waiting {
-            background-color: #FFC107;
+            color: #FFC107;
+            font-weight: bold;
+        }
+        
+        #connection-status {
+            text-align: center;
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 5px;
+            background: #f0f0f0;
+            grid-column: span 2;
+        }
+        
+        @media screen and (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            
+            #connection-status {
+                grid-column: span 1;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Control de Nodos IoT con GPS</h1>
+    <h1><i class="fas fa-info-circle"></i> Control de Nodos IoT con GPS</h1>
     
     <div class="container">
         <div class="panel">
-            <h2>Lista de Nodos</h2>
+            <h2><i class="fas fa-list"></i> Lista de Nodos</h2>
             <table id="nodesTable">
                 <thead>
                     <tr>
@@ -107,8 +166,6 @@
                         <th>Rol</th>
                         <th>Estado</th>
                         <th>Emparejado con</th>
-                        <th>IP</th>
-                        <th>RSSI</th>
                         <th>Acciones</th>
                     </tr>
                 </thead>
@@ -119,15 +176,15 @@
         </div>
         
         <div class="panel">
-            <h2>Configuración de Nodo</h2>
+            <h2><i class="fas fa-cog"></i> Configuración de Nodo</h2>
             <div class="form-group">
-                <label for="nodeSelect">Seleccionar Nodo:</label>
+                <label for="nodeSelect"><i class="fas fa-microchip"></i> Seleccionar Nodo:</label>
                 <select id="nodeSelect">
                     <option value="">-- Seleccione un nodo --</option>
                 </select>
             </div>
             <div class="form-group">
-                <label for="roleSelect">Rol:</label>
+                <label for="roleSelect"><i class="fas fa-user-tag"></i> Rol:</label>
                 <select id="roleSelect">
                     <option value="UNCONFIGURED">Sin configurar</option>
                     <option value="MASTER">Maestro</option>
@@ -135,31 +192,31 @@
                 </select>
             </div>
             <div class="form-group" id="pairGroup" style="display: none;">
-                <label for="pairSelect">Emparejar con:</label>
+                <label for="pairSelect"><i class="fas fa-link"></i> Emparejar con:</label>
                 <select id="pairSelect">
                     <option value="">-- Ninguno --</option>
                 </select>
             </div>
-            <button id="saveConfigBtn">Guardar Configuración</button>
+            <button id="saveConfigBtn"><i class="fas fa-save"></i> Guardar Configuración</button>
         </div>
         
-        <div class="panel">
-            <h2>Datos GPS</h2>
+        <div class="panel" style="grid-column: span 2;">
+            <h2><i class="fas fa-map-marked-alt"></i> Datos GPS</h2>
             <div id="gpsData">
                 <p>Seleccione un nodo para ver sus datos GPS</p>
             </div>
             <div id="map"></div>
         </div>
         
-        <div class="panel">
-            <h2>Gráfico de Ubicación</h2>
-            <canvas id="locationChart" width="400" height="400"></canvas>
+        <div id="connection-status">
+            <i class="fas fa-plug"></i> Conectando al servidor MQTT...
         </div>
     </div>
 
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
         // Variables globales
-        let client;
+        let mqttClient;
         let nodes = {};
         let selectedNode = null;
         let map;
@@ -171,44 +228,84 @@
             longitudes: []
         };
 
-        // Inicializar MQTT
+        // Inicializar MQTT con la conexión funcional que proporcionaste
         function initMQTT() {
-            client = new Paho.MQTT.Client("test.mosquitto.org", 8080, "webClient_" + Math.random().toString(16).substr(2, 8));
-            
-            client.onConnectionLost = onConnectionLost;
-            client.onMessageArrived = onMessageArrived;
-            
-            client.connect({
-                onSuccess: onConnect,
-                useSSL: true
+            const options = {
+                keepalive: 60,
+                clean: true,
+                reconnectPeriod: 1000,
+                connectTimeout: 30 * 1000,
+                clientId: 'webclient_' + Math.random().toString(16).substr(2, 8)
+            };
+
+            // Usando el endpoint que funciona en tu ejemplo
+            mqttClient = mqtt.connect("wss://test.mosquitto.org:8081/mqtt", options);
+
+            // Manejo de conexión
+            mqttClient.on('connect', () => {
+                console.log("Conectado al broker MQTT");
+                updateConnectionStatus('Conectado al servidor MQTT', 'success');
+                
+                // Suscribirse a los topics necesarios
+                mqttClient.subscribe("iotlab/nodes/status", { qos: 1 });
+                mqttClient.subscribe("iotlab/gps/data", { qos: 1 });
+                mqttClient.subscribe("iotlab/pairing/response", { qos: 1 });
+            });
+
+            mqttClient.on('error', (err) => {
+                console.error("Error MQTT:", err);
+                updateConnectionStatus('Error de conexión MQTT', 'error');
+            });
+
+            mqttClient.on('reconnect', () => {
+                updateConnectionStatus('Reconectando...', 'warning');
+            });
+
+            mqttClient.on('close', () => {
+                updateConnectionStatus('Conexión cerrada', 'error');
+            });
+
+            // Procesar mensajes
+            mqttClient.on('message', (topic, message) => {
+                try {
+                    const payload = JSON.parse(message.toString());
+                    
+                    if (topic === "iotlab/nodes/status") {
+                        updateNodeList(payload);
+                    } else if (topic === "iotlab/gps/data") {
+                        updateGPSData(payload);
+                    } else if (topic === "iotlab/pairing/response") {
+                        handlePairingResponse(payload);
+                    }
+                } catch (e) {
+                    console.error("Error al procesar mensaje:", e);
+                }
             });
         }
-        
-        function onConnect() {
-            console.log("Conectado al broker MQTT");
-            client.subscribe("iotlab/nodes/status");
-            client.subscribe("iotlab/gps/data");
-        }
-        
-        function onConnectionLost(responseObject) {
-            if (responseObject.errorCode !== 0) {
-                console.log("Conexión perdida: " + responseObject.errorMessage);
-                // Intentar reconectar después de 5 segundos
-                setTimeout(initMQTT, 5000);
-            }
-        }
-        
-        function onMessageArrived(message) {
-            const topic = message.destinationName;
-            const payload = JSON.parse(message.payloadString);
+
+        function updateConnectionStatus(message, type) {
+            const statusElement = document.getElementById('connection-status');
+            statusElement.innerHTML = `<i class="fas fa-plug"></i> ${message}`;
             
-            if (topic === "iotlab/nodes/status") {
-                updateNodeList(payload);
-            } else if (topic === "iotlab/gps/data") {
-                updateGPSData(payload);
+            switch(type) {
+                case 'success':
+                    statusElement.style.background = '#d4edda';
+                    statusElement.style.color = '#155724';
+                    break;
+                case 'error':
+                    statusElement.style.background = '#f8d7da';
+                    statusElement.style.color = '#721c24';
+                    break;
+                case 'warning':
+                    statusElement.style.background = '#fff3cd';
+                    statusElement.style.color = '#856404';
+                    break;
+                default:
+                    statusElement.style.background = '#f0f0f0';
+                    statusElement.style.color = '#000';
             }
         }
-        
+
         // Actualizar lista de nodos
         function updateNodeList(nodeData) {
             const nodeId = nodeData.mac;
@@ -235,13 +332,14 @@
             existingRow.innerHTML = `
                 <td>${nodeId}</td>
                 <td>${nodeData.role}</td>
-                <td><span class="status-indicator ${statusClass}"></span>${nodeData.status}</td>
+                <td class="${statusClass}">
+                    <i class="fas fa-${statusClass === 'online' ? 'check-circle' : 
+                                      statusClass === 'waiting' ? 'hourglass-half' : 'times-circle'}"></i>
+                    ${nodeData.status.toUpperCase()}
+                </td>
                 <td>${nodeData.paired_with || "Ninguno"}</td>
-                <td>${nodeData.ip}</td>
-                <td>${nodeData.rssi} dBm</td>
                 <td>
-                    <button onclick="selectNode('${nodeId}')">Configurar</button>
-                    <button onclick="viewGPS('${nodeId}')">Ver GPS</button>
+                    <button onclick="selectNode('${nodeId}')"><i class="fas fa-cog"></i> Configurar</button>
                 </td>
             `;
             
@@ -251,7 +349,7 @@
                 updatePairSelect();
             }
         }
-        
+
         // Actualizar datos GPS
         function updateGPSData(gpsData) {
             const nodeId = gpsData.mac;
@@ -260,11 +358,11 @@
             if (!selectedNode || selectedNode === nodeId) {
                 const gpsDiv = document.getElementById("gpsData");
                 gpsDiv.innerHTML = `
-                    <h3>Nodo: ${nodeId}</h3>
-                    <p><strong>Ubicación:</strong> ${gpsData.lat.toFixed(6)}, ${gpsData.lng.toFixed(6)}</p>
-                    <p><strong>Altitud:</strong> ${gpsData.alt.toFixed(2)} m</p>
-                    <p><strong>Satélites:</strong> ${gpsData.sats}</p>
-                    <p><strong>Rol:</strong> ${gpsData.role}</p>
+                    <h3><i class="fas fa-microchip"></i> Nodo: ${nodeId}</h3>
+                    <p><strong><i class="fas fa-map-pin"></i> Ubicación:</strong> ${gpsData.lat.toFixed(6)}, ${gpsData.lng.toFixed(6)}</p>
+                    <p><strong><i class="fas fa-mountain"></i> Altitud:</strong> ${gpsData.alt.toFixed(2)} m</p>
+                    <p><strong><i class="fas fa-satellite"></i> Satélites:</strong> ${gpsData.sats}</p>
+                    <p><strong><i class="fas fa-user-tag"></i> Rol:</strong> ${gpsData.role}</p>
                 `;
                 
                 // Actualizar mapa
@@ -274,7 +372,15 @@
                 updateChart(gpsData.lat, gpsData.lng);
             }
         }
-        
+
+        // Manejar respuesta de emparejamiento
+        function handlePairingResponse(response) {
+            if (response.slave_mac && nodes[response.slave_mac]) {
+                nodes[response.slave_mac].paired_with = response.master_mac;
+                updateNodeList(nodes[response.slave_mac]);
+            }
+        }
+
         // Actualizar selectores
         function updateSelectors() {
             const nodeSelect = document.getElementById("nodeSelect");
@@ -316,7 +422,7 @@
                 pairSelect.value = selectedPairValue;
             }
         }
-        
+
         // Seleccionar nodo para configuración
         function selectNode(nodeId) {
             selectedNode = nodeId;
@@ -327,7 +433,7 @@
             
             updatePairSelect();
         }
-        
+
         // Actualizar selector de emparejamiento
         function updatePairSelect() {
             const roleSelect = document.getElementById("roleSelect");
@@ -346,23 +452,7 @@
                 pairGroup.style.display = "none";
             }
         }
-        
-        // Ver datos GPS de un nodo
-        function viewGPS(nodeId) {
-            selectedNode = nodeId;
-            document.getElementById("nodeSelect").value = nodeId;
-            
-            // Si el nodo tiene datos GPS recientes, mostrarlos
-            if (nodes[nodeId] && nodes[nodeId].lat) {
-                updateGPSData(nodes[nodeId]);
-            } else {
-                document.getElementById("gpsData").innerHTML = `
-                    <h3>Nodo: ${nodeId}</h3>
-                    <p>Esperando datos GPS...</p>
-                `;
-            }
-        }
-        
+
         // Guardar configuración
         document.getElementById("saveConfigBtn").addEventListener("click", function() {
             const nodeId = document.getElementById("nodeSelect").value;
@@ -383,38 +473,22 @@
                 message.pair_with = pairWith;
             }
             
-            const mqttMessage = new Paho.MQTT.Message(JSON.stringify(message));
-            mqttMessage.destinationName = "iotlab/nodes/config";
-            client.send(mqttMessage);
+            mqttClient.publish("iotlab/nodes/config", JSON.stringify(message), { qos: 1 });
             
             alert("Configuración enviada al nodo");
         });
-        
+
         // Inicializar mapa
         function initMap() {
-            // Usaremos OpenStreetMap con Leaflet
-            const mapDiv = document.getElementById("map");
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
             
-            // Cargar Leaflet dinámicamente
-            const leafletCSS = document.createElement("link");
-            leafletCSS.rel = "stylesheet";
-            leafletCSS.href = "https://unpkg.com/leaflet@1.7.1/dist/leaflet.css";
-            document.head.appendChild(leafletCSS);
-            
-            const leafletJS = document.createElement("script");
-            leafletJS.src = "https://unpkg.com/leaflet@1.7.1/dist/leaflet.js";
-            leafletJS.onload = function() {
-                map = L.map('map').setView([0, 0], 2);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                }).addTo(map);
-                
-                marker = L.marker([0, 0]).addTo(map)
-                    .bindPopup("Ubicación actual");
-            };
-            document.head.appendChild(leafletJS);
+            marker = L.marker([0, 0]).addTo(map)
+                .bindPopup("Seleccione un nodo para ver su ubicación");
         }
-        
+
         // Actualizar mapa con nueva ubicación
         function updateMap(lat, lng) {
             if (map && marker) {
@@ -423,97 +497,35 @@
                 marker.bindPopup(`Ubicación actual:<br>Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}`).openPopup();
             }
         }
-        
+
         // Inicializar gráfico
         function initChart() {
-            const ctx = document.getElementById('locationChart').getContext('2d');
-            locationChart = new Chart(ctx, {
-                type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: 'Ubicación',
-                        data: [],
-                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1,
-                        pointRadius: 5
-                    }]
-                },
-                options: {
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            position: 'bottom',
-                            title: {
-                                display: true,
-                                text: 'Longitud'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'Latitud'
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return `Lat: ${context.parsed.y.toFixed(6)}, Lng: ${context.parsed.x.toFixed(6)}`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
+            const ctx = document.getElementById('map').getContext('2d'); // Reusamos el contenedor del mapa para simplificar
+            // El gráfico se mostrará en otra versión si es necesario
         }
-        
-        // Actualizar gráfico con nueva ubicación
-        function updateChart(lat, lng) {
-            if (!locationChart) return;
-            
-            // Agregar nuevo punto
-            locationData.labels.push(new Date().toLocaleTimeString());
-            locationData.latitudes.push(lat);
-            locationData.longitudes.push(lng);
-            
-            // Mantener solo los últimos 20 puntos
-            if (locationData.labels.length > 20) {
-                locationData.labels.shift();
-                locationData.latitudes.shift();
-                locationData.longitudes.shift();
-            }
-            
-            // Preparar datos para el gráfico
-            const chartData = locationData.latitudes.map((lat, i) => ({
-                x: locationData.longitudes[i],
-                y: lat
-            }));
-            
-            // Actualizar gráfico
-            locationChart.data.datasets[0].data = chartData;
-            locationChart.update();
-        }
-        
+
         // Escuchar cambios en el selector de rol
         document.getElementById("roleSelect").addEventListener("change", updatePairSelect);
         
         // Escuchar cambios en el selector de nodo
         document.getElementById("nodeSelect").addEventListener("change", function() {
             selectedNode = this.value;
-            if (selectedNode) {
+            if (selectedNode && nodes[selectedNode]) {
                 const node = nodes[selectedNode];
                 document.getElementById("roleSelect").value = node.role;
                 updatePairSelect();
+                
+                // Si el nodo tiene datos GPS, mostrarlos
+                if (node.lat && node.lng) {
+                    updateGPSData(node);
+                }
             }
         });
-        
+
         // Inicializar
         window.onload = function() {
             initMQTT();
             initMap();
-            initChart();
         };
     </script>
 </body>
