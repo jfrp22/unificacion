@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Nodos IoT con GPS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .panel {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+            border-radius: 8px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .online {
+            background-color: #4CAF50;
+        }
+        .offline {
+            background-color: #f44336;
+        }
+        .waiting {
+            background-color: #FFC107;
+        }
+    </style>
+</head>
+<body>
+    <h1>Control de Nodos IoT con GPS</h1>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>Lista de Nodos</h2>
+            <table id="nodesTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Rol</th>
+                        <th>Estado</th>
+                        <th>Emparejado con</th>
+                        <th>IP</th>
+                        <th>RSSI</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="nodesList">
+                    <!-- Los nodos se agregarán aquí dinámicamente -->
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="panel">
+            <h2>Configuración de Nodo</h2>
+            <div class="form-group">
+                <label for="nodeSelect">Seleccionar Nodo:</label>
+                <select id="nodeSelect">
+                    <option value="">-- Seleccione un nodo --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="roleSelect">Rol:</label>
+                <select id="roleSelect">
+                    <option value="UNCONFIGURED">Sin configurar</option>
+                    <option value="MASTER">Maestro</option>
+                    <option value="SLAVE">Esclavo</option>
+                </select>
+            </div>
+            <div class="form-group" id="pairGroup" style="display: none;">
+                <label for="pairSelect">Emparejar con:</label>
+                <select id="pairSelect">
+                    <option value="">-- Ninguno --</option>
+                </select>
+            </div>
+            <button id="saveConfigBtn">Guardar Configuración</button>
+        </div>
+        
+        <div class="panel">
+            <h2>Datos GPS</h2>
+            <div id="gpsData">
+                <p>Seleccione un nodo para ver sus datos GPS</p>
+            </div>
+            <div id="map"></div>
+        </div>
+        
+        <div class="panel">
+            <h2>Gráfico de Ubicación</h2>
+            <canvas id="locationChart" width="400" height="400"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Variables globales
+        let client;
+        let nodes = {};
+        let selectedNode = null;
+        let map;
+        let marker;
+        let locationChart;
+        let locationData = {
+            labels: [],
+            latitudes: [],
+            longitudes: []
+        };
+
+        // Inicializar MQTT
+        function initMQTT() {
+            client = new Paho.MQTT.Client("test.mosquitto.org", 8080, "webClient_" + Math.random().toString(16).substr(2, 8));
+            
+            client.onConnectionLost = onConnectionLost;
+            client.onMessageArrived = onMessageArrived;
+            
+            client.connect({
+                onSuccess: onConnect,
+                useSSL: true
+            });
+        }
+        
+        function onConnect() {
+            console.log("Conectado al broker MQTT");
+            client.subscribe("iotlab/nodes/status");
+            client.subscribe("iotlab/gps/data");
+        }
+        
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("Conexión perdida: " + responseObject.errorMessage);
+                // Intentar reconectar después de 5 segundos
+                setTimeout(initMQTT, 5000);
+            }
+        }
+        
+        function onMessageArrived(message) {
+            const topic = message.destinationName;
+            const payload = JSON.parse(message.payloadString);
+            
+            if (topic === "iotlab/nodes/status") {
+                updateNodeList(payload);
+            } else if (topic === "iotlab/gps/data") {
+                updateGPSData(payload);
+            }
+        }
+        
+        // Actualizar lista de nodos
+        function updateNodeList(nodeData) {
+            const nodeId = nodeData.mac;
+            nodes[nodeId] = nodeData;
+            
+            // Actualizar selectores
+            updateSelectors();
+            
+            // Actualizar tabla
+            const tableBody = document.getElementById("nodesList");
+            let existingRow = document.getElementById(`node-${nodeId}`);
+            
+            if (!existingRow) {
+                existingRow = document.createElement("tr");
+                existingRow.id = `node-${nodeId}`;
+                tableBody.appendChild(existingRow);
+            }
+            
+            // Determinar clase de estado
+            let statusClass = "offline";
+            if (nodeData.status === "active") statusClass = "online";
+            else if (nodeData.status === "waiting") statusClass = "waiting";
+            
+            existingRow.innerHTML = `
+                <td>${nodeId}</td>
+                <td>${nodeData.role}</td>
+                <td><span class="status-indicator ${statusClass}"></span>${nodeData.status}</td>
+                <td>${nodeData.paired_with || "Ninguno"}</td>
+                <td>${nodeData.ip}</td>
+                <td>${nodeData.rssi} dBm</td>
+                <td>
+                    <button onclick="selectNode('${nodeId}')">Configurar</button>
+                    <button onclick="viewGPS('${nodeId}')">Ver GPS</button>
+                </td>
+            `;
+            
+            // Si el nodo seleccionado se actualiza, actualizar la UI
+            if (selectedNode === nodeId) {
+                document.getElementById("roleSelect").value = nodeData.role;
+                updatePairSelect();
+            }
+        }
+        
+        // Actualizar datos GPS
+        function updateGPSData(gpsData) {
+            const nodeId = gpsData.mac;
+            
+            // Solo actualizar si es el nodo seleccionado o si no hay ninguno seleccionado
+            if (!selectedNode || selectedNode === nodeId) {
+                const gpsDiv = document.getElementById("gpsData");
+                gpsDiv.innerHTML = `
+                    <h3>Nodo: ${nodeId}</h3>
+                    <p><strong>Ubicación:</strong> ${gpsData.lat.toFixed(6)}, ${gpsData.lng.toFixed(6)}</p>
+                    <p><strong>Altitud:</strong> ${gpsData.alt.toFixed(2)} m</p>
+                    <p><strong>Satélites:</strong> ${gpsData.sats}</p>
+                    <p><strong>Rol:</strong> ${gpsData.role}</p>
+                `;
+                
+                // Actualizar mapa
+                updateMap(gpsData.lat, gpsData.lng);
+                
+                // Actualizar gráfico
+                updateChart(gpsData.lat, gpsData.lng);
+            }
+        }
+        
+        // Actualizar selectores
+        function updateSelectors() {
+            const nodeSelect = document.getElementById("nodeSelect");
+            const pairSelect = document.getElementById("pairSelect");
+            
+            // Guardar selecciones actuales
+            const selectedNodeValue = nodeSelect.value;
+            const selectedPairValue = pairSelect.value;
+            
+            // Limpiar selectores
+            nodeSelect.innerHTML = '<option value="">-- Seleccione un nodo --</option>';
+            pairSelect.innerHTML = '<option value="">-- Ninguno --</option>';
+            
+            // Llenar con nodos disponibles
+            Object.keys(nodes).forEach(nodeId => {
+                const node = nodes[nodeId];
+                
+                // Selector de nodo
+                const option = document.createElement("option");
+                option.value = nodeId;
+                option.textContent = `${nodeId} (${node.role})`;
+                nodeSelect.appendChild(option);
+                
+                // Selector de emparejamiento (solo maestros)
+                if (node.role === "MASTER") {
+                    const pairOption = document.createElement("option");
+                    pairOption.value = nodeId;
+                    pairOption.textContent = nodeId;
+                    pairSelect.appendChild(pairOption);
+                }
+            });
+            
+            // Restaurar selecciones si aún existen
+            if (nodes[selectedNodeValue]) {
+                nodeSelect.value = selectedNodeValue;
+            }
+            
+            if (nodes[selectedPairValue]) {
+                pairSelect.value = selectedPairValue;
+            }
+        }
+        
+        // Seleccionar nodo para configuración
+        function selectNode(nodeId) {
+            selectedNode = nodeId;
+            const node = nodes[nodeId];
+            
+            document.getElementById("nodeSelect").value = nodeId;
+            document.getElementById("roleSelect").value = node.role;
+            
+            updatePairSelect();
+        }
+        
+        // Actualizar selector de emparejamiento
+        function updatePairSelect() {
+            const roleSelect = document.getElementById("roleSelect");
+            const pairGroup = document.getElementById("pairGroup");
+            const pairSelect = document.getElementById("pairSelect");
+            
+            if (roleSelect.value === "SLAVE") {
+                pairGroup.style.display = "block";
+                
+                // Seleccionar el maestro actual si existe
+                const node = nodes[selectedNode];
+                if (node && node.paired_with && node.paired_with !== "Ninguno") {
+                    pairSelect.value = node.paired_with;
+                }
+            } else {
+                pairGroup.style.display = "none";
+            }
+        }
+        
+        // Ver datos GPS de un nodo
+        function viewGPS(nodeId) {
+            selectedNode = nodeId;
+            document.getElementById("nodeSelect").value = nodeId;
+            
+            // Si el nodo tiene datos GPS recientes, mostrarlos
+            if (nodes[nodeId] && nodes[nodeId].lat) {
+                updateGPSData(nodes[nodeId]);
+            } else {
+                document.getElementById("gpsData").innerHTML = `
+                    <h3>Nodo: ${nodeId}</h3>
+                    <p>Esperando datos GPS...</p>
+                `;
+            }
+        }
+        
+        // Guardar configuración
+        document.getElementById("saveConfigBtn").addEventListener("click", function() {
+            const nodeId = document.getElementById("nodeSelect").value;
+            const role = document.getElementById("roleSelect").value;
+            const pairWith = document.getElementById("pairSelect").value;
+            
+            if (!nodeId) {
+                alert("Por favor seleccione un nodo");
+                return;
+            }
+            
+            const message = {
+                target: nodeId,
+                role: role
+            };
+            
+            if (role === "SLAVE" && pairWith) {
+                message.pair_with = pairWith;
+            }
+            
+            const mqttMessage = new Paho.MQTT.Message(JSON.stringify(message));
+            mqttMessage.destinationName = "iotlab/nodes/config";
+            client.send(mqttMessage);
+            
+            alert("Configuración enviada al nodo");
+        });
+        
+        // Inicializar mapa
+        function initMap() {
+            // Usaremos OpenStreetMap con Leaflet
+            const mapDiv = document.getElementById("map");
+            
+            // Cargar Leaflet dinámicamente
+            const leafletCSS = document.createElement("link");
+            leafletCSS.rel = "stylesheet";
+            leafletCSS.href = "https://unpkg.com/leaflet@1.7.1/dist/leaflet.css";
+            document.head.appendChild(leafletCSS);
+            
+            const leafletJS = document.createElement("script");
+            leafletJS.src = "https://unpkg.com/leaflet@1.7.1/dist/leaflet.js";
+            leafletJS.onload = function() {
+                map = L.map('map').setView([0, 0], 2);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+                
+                marker = L.marker([0, 0]).addTo(map)
+                    .bindPopup("Ubicación actual");
+            };
+            document.head.appendChild(leafletJS);
+        }
+        
+        // Actualizar mapa con nueva ubicación
+        function updateMap(lat, lng) {
+            if (map && marker) {
+                marker.setLatLng([lat, lng]);
+                map.setView([lat, lng], 15);
+                marker.bindPopup(`Ubicación actual:<br>Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}`).openPopup();
+            }
+        }
+        
+        // Inicializar gráfico
+        function initChart() {
+            const ctx = document.getElementById('locationChart').getContext('2d');
+            locationChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Ubicación',
+                        data: [],
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        pointRadius: 5
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Longitud'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Latitud'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Lat: ${context.parsed.y.toFixed(6)}, Lng: ${context.parsed.x.toFixed(6)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Actualizar gráfico con nueva ubicación
+        function updateChart(lat, lng) {
+            if (!locationChart) return;
+            
+            // Agregar nuevo punto
+            locationData.labels.push(new Date().toLocaleTimeString());
+            locationData.latitudes.push(lat);
+            locationData.longitudes.push(lng);
+            
+            // Mantener solo los últimos 20 puntos
+            if (locationData.labels.length > 20) {
+                locationData.labels.shift();
+                locationData.latitudes.shift();
+                locationData.longitudes.shift();
+            }
+            
+            // Preparar datos para el gráfico
+            const chartData = locationData.latitudes.map((lat, i) => ({
+                x: locationData.longitudes[i],
+                y: lat
+            }));
+            
+            // Actualizar gráfico
+            locationChart.data.datasets[0].data = chartData;
+            locationChart.update();
+        }
+        
+        // Escuchar cambios en el selector de rol
+        document.getElementById("roleSelect").addEventListener("change", updatePairSelect);
+        
+        // Escuchar cambios en el selector de nodo
+        document.getElementById("nodeSelect").addEventListener("change", function() {
+            selectedNode = this.value;
+            if (selectedNode) {
+                const node = nodes[selectedNode];
+                document.getElementById("roleSelect").value = node.role;
+                updatePairSelect();
+            }
+        });
+        
+        // Inicializar
+        window.onload = function() {
+            initMQTT();
+            initMap();
+            initChart();
+        };
+    </script>
+</body>
+</html>
